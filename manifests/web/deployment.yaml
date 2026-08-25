@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  labels:
+    app: web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      # The GHCR package is private, so the kubelet needs credentials to pull.
+      imagePullSecrets:
+        - name: ghcr
+      containers:
+        - name: web
+          image: ghcr.io/jensravn/k8s-lab/web:0.1.0
+          ports:
+            - containerPort: 8080
+          # Requests drive scheduling; limits cap a runaway container. Both
+          # matter on two small burstable nodes.
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          # Readiness gates traffic, liveness restarts a wedged container.
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 10
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      # Keep the two replicas on different nodes so draining one is visible.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: web

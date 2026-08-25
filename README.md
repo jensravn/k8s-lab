@@ -68,3 +68,38 @@ changing. They move to GitHub Actions once it settles — build on push,
 tag with the commit SHA, and deploy. Avoid `:latest`: Kubernetes cannot tell
 that a tag it already has has changed, so a rollout does nothing.
 
+## Deploy
+
+The GHCR package is private, so the cluster needs credentials to pull it.
+Use a token with only `read:packages` — the token `gh` holds also carries
+`repo`, and a leaked secret should not hand over every repository.
+
+```bash
+kubectl create secret docker-registry ghcr \
+  --docker-server=ghcr.io \
+  --docker-username="$(gh api user --jq .login)" \
+  --docker-password=<personal access token>
+```
+
+The secret is namespaced: it has to live in the same namespace as the pods
+that reference it. Its contents are base64, which is encoding, not
+encryption — anyone who can read the secret can read the token.
+
+```bash
+kubectl apply -f manifests/web/
+kubectl get pods --output wide
+kubectl get service web --watch      # EXTERNAL-IP stays <pending> for a minute
+```
+
+The Service is `ClusterIP`: only reachable inside the cluster. Nothing
+outside reaches it yet — that is the next section's job.
+
+The two replicas are spread across nodes, so draining one shows Kubernetes
+rescheduling while the site keeps answering:
+
+```bash
+kubectl drain <node> --ignore-daemonsets --delete-emptydir-data
+kubectl get pods --output wide
+kubectl uncordon <node>
+```
+
