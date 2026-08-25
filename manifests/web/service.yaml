@@ -3,8 +3,8 @@ kind: Service
 metadata:
   name: web
 spec:
-  # ClusterIP: reachable only inside the cluster. Nothing from outside gets
-  # here until something public is put in front of it.
+  # ClusterIP, not LoadBalancer: the Gateway owns the only public IP, and an
+  # HTTPRoute sends this hostname's traffic here.
   type: ClusterIP
   selector:
     app: web

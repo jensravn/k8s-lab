@@ -1,0 +1,17 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: web
+spec:
+  gatewayClassName: eg
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      hostname: jravn.com
+      # The Gateway lives in the same namespace as the app, so routes from
+      # elsewhere would need a ReferenceGrant to attach. One app, one
+      # namespace: nothing to grant.
+      allowedRoutes:
+        namespaces:
+          from: Same

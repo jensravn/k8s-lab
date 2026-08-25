@@ -1,0 +1,16 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: eg
+spec:
+  # Envoy Gateway only acts on this exact name. Several controllers can share
+  # a cluster, each with its own class, which is how the data path gets
+  # swapped without touching anyone's HTTPRoutes.
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+  # Infrastructure settings for every Gateway in this class — here, which
+  # Azure public IP the load balancer must claim.
+  parametersRef:
+    group: gateway.envoyproxy.io
+    kind: EnvoyProxy
+    name: azure-lb
+    namespace: envoy-gateway-system

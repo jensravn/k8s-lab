@@ -1,0 +1,16 @@
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: azure-lb
+  namespace: envoy-gateway-system
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService:
+        annotations:
+          # Envoy Gateway creates the LoadBalancer Service itself, so the only
+          # way to reach it is through the GatewayClass. Without this Azure
+          # hands out a fresh address every time the Service is recreated,
+          # which is useless to point DNS at.
+          service.beta.kubernetes.io/azure-pip-name: k8s-lab-ingress-ip

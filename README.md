@@ -91,8 +91,9 @@ kubectl get pods --output wide
 kubectl get service web --watch      # EXTERNAL-IP stays <pending> for a minute
 ```
 
-The Service is `ClusterIP`: only reachable inside the cluster. Nothing
-outside reaches it yet — that is the next section's job.
+The Service is `ClusterIP`: only reachable inside the cluster. Everything
+from outside arrives through the Gateway below. The HTTPRoute applied here
+sits idle until that Gateway exists, and attaches on its own once it does.
 
 The two replicas are spread across nodes, so draining one shows Kubernetes
 rescheduling while the site keeps answering:
@@ -102,4 +103,97 @@ kubectl drain <node> --ignore-daemonsets --delete-emptydir-data
 kubectl get pods --output wide
 kubectl uncordon <node>
 ```
+
+## Traffic and DNS
+
+Everything from outside arrives through one shared entry point:
+
+```
+jravn.com            A record in Google Cloud DNS
+      |
+$INGRESS_IP          static public IP in Azure
+      |
+Gateway              Envoy Gateway, owns the listener
+      |
+HTTPRoute            jravn.com -> web
+      |
+web Service          ClusterIP, internal only
+      |
+2 pods               one per node
+```
+
+Gateway API splits what `Ingress` crammed into a single resource. The
+`Gateway` owns the listener and the only public IP; an `HTTPRoute` attaches
+to it and says where one hostname's traffic goes. A second app is another
+HTTPRoute — no extra load balancer, no extra IP, no DNS work beyond the one
+record.
+
+The split is also a split of ownership. Whoever runs the cluster owns the
+GatewayClass and the Gateway; whoever ships an app owns its route, and can
+do so without touching shared infrastructure.
+
+### Static IP
+
+An Azure load balancer gets a fresh IP every time it is recreated, which is
+useless to point DNS at. Create the address up front instead, in the node
+resource group AKS manages:
+
+```bash
+NODE_RG=$(az aks show --resource-group k8s-lab-rg --name k8s-lab \
+  --query nodeResourceGroup --output tsv)
+
+INGRESS_IP=$(az network public-ip create --resource-group "$NODE_RG" \
+  --name k8s-lab-ingress-ip --sku Standard --allocation-method Static \
+  --query publicIp.ipAddress --output tsv)
+```
+
+Keep `$INGRESS_IP` — the DNS record below needs it. A rebuilt cluster gets a
+different address, so nothing downstream may hardcode one.
+
+### Gateway controller
+
+```bash
+helm upgrade --install envoy-gateway oci://docker.io/envoyproxy/gateway-helm \
+  --version 1.9.0 \
+  --namespace envoy-gateway-system --create-namespace
+```
+
+The chart brings the Gateway API CRDs and the controller, and nothing else.
+It does not create a GatewayClass — that is the cluster's decision, and it
+lives in `manifests/gateway/`.
+
+### Gateway and routes
+
+```bash
+kubectl apply -f manifests/gateway/
+kubectl get gateway web --watch      # ADDRESS stays empty for a minute
+```
+
+Envoy Gateway creates the LoadBalancer Service itself, one per Gateway, so
+there is no Service of your own to annotate. The way in is the GatewayClass:
+it points at an `EnvoyProxy` resource holding the infrastructure settings for
+every Gateway in the class — here, the annotation that claims
+`k8s-lab-ingress-ip` instead of accepting a fresh address.
+
+One listener, on port 80. The HTTPRoute applied with the app attaches to it
+and sends `jravn.com` to the `web` Service.
+
+### DNS
+
+The domain is registered on Google Cloud, so the record lives there. The
+cluster being on Azure makes no difference; DNS is independent of both.
+
+```bash
+gcloud dns record-sets update jravn.com. \
+  --project=jensravn --zone=jravn-com \
+  --type=A --ttl=300 --rrdatas="$INGRESS_IP"
+```
+
+`update`, not `create` — the zone outlives the cluster, so on a rebuild the
+record is already there and `create` fails. Use `create` only for a name the
+zone has never held.
+
+The site lives at the apex rather than a subdomain, which forces an `A`
+record: a zone apex cannot be a `CNAME`. That is the whole reason the address
+is created up front and static.
 

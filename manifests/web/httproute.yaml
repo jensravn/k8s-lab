@@ -1,0 +1,16 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: web
+spec:
+  # The route attaches to a Gateway instead of describing an entry point of
+  # its own. That split is the point of Gateway API: the Gateway is
+  # infrastructure, owned once, and every app hangs a route off it.
+  parentRefs:
+    - name: web
+  hostnames:
+    - jravn.com
+  rules:
+    - backendRefs:
+        - name: web
+          port: 80
