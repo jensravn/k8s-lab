@@ -104,7 +104,7 @@ kubectl get pods --output wide
 kubectl uncordon <node>
 ```
 
-## Traffic and DNS
+## Traffic, DNS and TLS
 
 Everything from outside arrives through one shared entry point:
 
@@ -113,7 +113,7 @@ jravn.com            A record in Google Cloud DNS
       |
 $INGRESS_IP          static public IP in Azure
       |
-Gateway              Envoy Gateway, owns the listener
+Gateway              Envoy Gateway, owns the listeners and terminates TLS
       |
 HTTPRoute            jravn.com -> web
       |
@@ -123,10 +123,10 @@ web Service          ClusterIP, internal only
 ```
 
 Gateway API splits what `Ingress` crammed into a single resource. The
-`Gateway` owns the listener and the only public IP; an `HTTPRoute` attaches
-to it and says where one hostname's traffic goes. A second app is another
-HTTPRoute — no extra load balancer, no extra IP, no DNS work beyond the one
-record.
+`Gateway` owns the listeners, the certificate and the only public IP; an
+`HTTPRoute` attaches to it and says where one hostname's traffic goes. A
+second app is another HTTPRoute — no extra load balancer, no extra IP, no
+DNS work beyond the one record.
 
 The split is also a split of ownership. Whoever runs the cluster owns the
 GatewayClass and the Gateway; whoever ships an app owns its route, and can
@@ -175,8 +175,20 @@ it points at an `EnvoyProxy` resource holding the infrastructure settings for
 every Gateway in the class — here, the annotation that claims
 `k8s-lab-ingress-ip` instead of accepting a fresh address.
 
-One listener, on port 80. The HTTPRoute applied with the app attaches to it
-and sends `jravn.com` to the `web` Service.
+Two listeners, and both are needed. HTTPS terminates TLS with the certificate
+in `web-tls`. HTTP exists because Let's Encrypt fetches its challenge token
+over plain HTTP, and because something has to send browsers to HTTPS —
+Gateway API does nothing implicitly, so the redirect that ingress controllers
+tend to perform for free is spelled out as its own HTTPRoute with a
+`RequestRedirect` filter.
+
+The two routes are pinned to a listener each with `sectionName`. Without it a
+route attaches to every listener on the Gateway, and the redirect would apply
+to HTTPS too — a loop.
+
+Until cert-manager fills `web-tls` further down, the HTTPS listener stays
+unresolved while the HTTP one serves. That is the expected state on a fresh
+cluster, not a failure.
 
 ### DNS
 
@@ -197,3 +209,63 @@ The site lives at the apex rather than a subdomain, which forces an `A`
 record: a zone apex cannot be a `CNAME`. That is the whole reason the address
 is created up front and static.
 
+### Certificates
+
+cert-manager requests certificates from Let's Encrypt and renews them about
+30 days before expiry, so they never need touching again.
+
+```bash
+helm repo add jetstack https://charts.jetstack.io
+helm repo update
+
+helm upgrade --install cert-manager jetstack/cert-manager \
+  --namespace cert-manager --create-namespace \
+  --version v1.21.1 \
+  --set crds.enabled=true \
+  --set config.apiVersion=controller.config.cert-manager.io/v1alpha1 \
+  --set config.kind=ControllerConfiguration \
+  --set config.gatewayAPI.enabled=true \
+  --set-string webhook.validatingWebhookConfigurationAnnotations."admissions\.enforcer/disabled"=true \
+  --set-string webhook.mutatingWebhookConfigurationAnnotations."admissions\.enforcer/disabled"=true
+
+kubectl apply -f manifests/cert-manager/cluster-issuer.yaml
+```
+
+`config.gatewayAPI.enabled` turns on the controller that watches Gateways.
+Without it the annotation on the Gateway is read by nobody and no certificate
+is ever requested — silently.
+
+The two `admissions.enforcer/disabled` annotations work around AKS. Azure
+runs an admission enforcer that edits cert-manager's webhook configuration
+behind Helm's back, and server-side apply then refuses to overwrite a field
+it does not own. The upgrade fails with a conflict on `namespaceSelector`.
+The annotation is Azure's documented way to be left alone. On an existing
+cluster where the enforcer already claimed the field, `--force-conflicts`
+takes it back once.
+
+The ClusterIssuer says which authority to ask and how to prove the domain
+belongs to you. HTTP-01 works by serving a token at
+`http://jravn.com/.well-known/acme-challenge/...`, so it needs no DNS
+credentials — but it cannot issue wildcard certificates. That would need
+DNS-01, which authenticates against the DNS provider's API instead.
+
+For a Gateway the solver attaches a short-lived HTTPRoute of its own for the
+duration of each challenge. Its exact path match beats the catch-all
+redirect, so the token is reachable over plain HTTP, which is all ACME will
+use.
+
+The Gateway opts in with the `cert-manager.io/cluster-issuer` annotation and
+a listener naming the secret to store the certificate in. cert-manager fills
+that secret, and the HTTPS listener starts serving.
+
+```bash
+kubectl get certificate
+kubectl describe certificate web-tls    # where to look when issuing fails
+```
+
+Renewal is the part that fails quietly two months later. Note that Let's
+Encrypt caches a successful authorization for around 30 days: reissuing
+within that window completes without a challenge and proves nothing about
+the solver. To exercise it for real, request a throwaway certificate from
+the staging endpoint with a fresh account key, and watch a `Challenge` and a
+`cm-acme-http-solver` HTTPRoute actually appear.

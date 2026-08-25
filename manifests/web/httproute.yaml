@@ -6,11 +6,37 @@ spec:
   # The route attaches to a Gateway instead of describing an entry point of
   # its own. That split is the point of Gateway API: the Gateway is
   # infrastructure, owned once, and every app hangs a route off it.
+  #
+  # sectionName pins it to the HTTPS listener. Without it the route would
+  # attach to every listener on the Gateway, including the one below that
+  # only redirects — and the two would fight over plain HTTP.
   parentRefs:
     - name: web
+      sectionName: https
   hostnames:
     - jravn.com
   rules:
     - backendRefs:
         - name: web
           port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: web-redirect
+spec:
+  parentRefs:
+    - name: web
+      sectionName: http
+  hostnames:
+    - jravn.com
+  rules:
+    # Gateway API does nothing implicitly, so the HTTP-to-HTTPS redirect that
+    # ingress controllers tend to perform for free has to be spelled out.
+    # cert-manager's challenge route matches an exact path and therefore wins
+    # over this one, which leaves ACME able to answer over plain HTTP.
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301

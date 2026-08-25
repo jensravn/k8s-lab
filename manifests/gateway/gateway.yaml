@@ -2,9 +2,15 @@ apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
   name: web
+  annotations:
+    # cert-manager watches this and keeps the secret named under the HTTPS
+    # listener filled, renewing about 30 days before expiry.
+    cert-manager.io/cluster-issuer: letsencrypt
 spec:
   gatewayClassName: eg
   listeners:
+    # Kept alongside HTTPS for two reasons: it redirects to HTTPS, and
+    # Let's Encrypt fetches its HTTP-01 challenge token over plain HTTP.
     - name: http
       protocol: HTTP
       port: 80
@@ -12,6 +18,17 @@ spec:
       # The Gateway lives in the same namespace as the app, so routes from
       # elsewhere would need a ReferenceGrant to attach. One app, one
       # namespace: nothing to grant.
+      allowedRoutes:
+        namespaces:
+          from: Same
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: jravn.com
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: web-tls
       allowedRoutes:
         namespaces:
           from: Same
