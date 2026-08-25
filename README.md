@@ -37,3 +37,34 @@ pnpm install
 pnpm dev            # http://localhost:5173
 ```
 
+The cluster nodes are amd64, so the image must be too. `--platform` is
+only needed when building on a different architecture, such as an ARM
+laptop; get it wrong and the pod fails with `exec format error`.
+
+```bash
+docker build --platform linux/amd64 --tag k8s-lab-web:dev apps/web
+docker run --rm --publish 8080:8080 k8s-lab-web:dev   # http://localhost:8080
+```
+
+Push to GitHub Container Registry. The token needs `write:packages`:
+
+```bash
+gh auth refresh --hostname github.com --scopes write:packages,read:packages
+```
+
+```bash
+gh auth token | docker login ghcr.io \
+  --username "$(gh api user --jq .login)" --password-stdin
+
+docker tag k8s-lab-web:dev ghcr.io/jensravn/k8s-lab/web:0.1.0
+docker push ghcr.io/jensravn/k8s-lab/web:0.1.0
+```
+
+A new GHCR package is private by default. Either make it public under the
+package settings on GitHub, or give the cluster an image pull secret.
+
+These steps are manual on purpose while the shape of the app is still
+changing. They move to GitHub Actions once it settles — build on push,
+tag with the commit SHA, and deploy. Avoid `:latest`: Kubernetes cannot tell
+that a tag it already has has changed, so a rollout does nothing.
+
