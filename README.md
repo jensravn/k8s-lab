@@ -27,3 +27,13 @@ az aks start --resource-group k8s-lab-rg --name k8s-lab
 
 To get rid of it entirely: `az group delete --name k8s-lab-rg --yes`
 
+## Web app
+
+React + Vite, served by nginx.
+
+```bash
+cd apps/web
+pnpm install
+pnpm dev            # http://localhost:5173
+```
+
