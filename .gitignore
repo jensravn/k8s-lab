@@ -1,0 +1,12 @@
+# Cluster credentials — never commit these
+kubeconfig
+*.kubeconfig
+.kube/
+
+# Secrets / env
+.env
+*.pem
+*.key
+
+# OS cruft
+.DS_Store
