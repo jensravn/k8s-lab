@@ -32,3 +32,24 @@ spec:
       allowedRoutes:
         namespaces:
           from: Same
+    # A second hostname is a second pair of listeners on the same Gateway,
+    # sharing its address and its load balancer. cert-manager fills a
+    # certificate secret per listener from the annotation above.
+    - name: sudoku-http
+      protocol: HTTP
+      port: 80
+      hostname: sudoku.jravn.com
+      allowedRoutes:
+        namespaces:
+          from: Same
+    - name: sudoku-https
+      protocol: HTTPS
+      port: 443
+      hostname: sudoku.jravn.com
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: sudoku-tls
+      allowedRoutes:
+        namespaces:
+          from: Same

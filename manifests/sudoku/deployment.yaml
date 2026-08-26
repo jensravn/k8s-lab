@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sudoku
+  labels:
+    app: sudoku
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: sudoku
+  template:
+    metadata:
+      labels:
+        app: sudoku
+    spec:
+      imagePullSecrets:
+        - name: ghcr
+      containers:
+        - name: sudoku
+          image: ghcr.io/jensravn/sudoku-solver:0.1.0
+          ports:
+            - containerPort: 8080
+          # The solver spins forever on puzzles that need guessing — a known
+          # defect, kept deliberately. The limit is what makes that survivable:
+          # a wedged request can take this container's CPU and no more, so the
+          # node and its neighbours stay healthy while this pod suffers.
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          # /healthz does nothing at all. It fails not by throwing but by never
+          # being scheduled, once a spinning request has eaten the CPU quota —
+          # which is exactly the failure worth watching.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: sudoku

@@ -269,3 +269,49 @@ within that window completes without a challenge and proves nothing about
 the solver. To exercise it for real, request a throwaway certificate from
 the staging endpoint with a fresh account key, and watch a `Challenge` and a
 `cm-acme-http-solver` HTTPRoute actually appear.
+
+## A second app
+
+`sudoku.jravn.com` runs [sudoku-solver](https://github.com/jensravn/sudoku-solver),
+an ASP.NET Core app that serves its own page and one API endpoint from a
+single container.
+
+Adding it took what the Gateway section promised and nothing more: a
+Deployment, a Service, a pair of HTTPRoutes, two more listeners on the
+existing Gateway, and one DNS record. No second load balancer, no second
+public address, no second certificate to renew by hand.
+
+```bash
+gcloud dns record-sets create sudoku.jravn.com. \
+  --project=jensravn --zone=jravn-com \
+  --type=A --ttl=300 --rrdatas="$INGRESS_IP"
+
+kubectl apply -f manifests/gateway/gateway.yaml -f manifests/sudoku/
+kubectl get certificate sudoku-tls --watch
+```
+
+The listeners are named `sudoku-http` and `sudoku-https`, and each route pins
+itself to one of them with `sectionName`. cert-manager sees the new HTTPS
+listener, reads the issuer annotation already on the Gateway, and fills
+`sudoku-tls` on its own.
+
+### It hangs on purpose
+
+The solver spins forever on puzzles that constraint propagation cannot
+finish — its backtracking loses track of which candidate the parent level had
+been trying, so it re-enters the branch that just failed. The defect is
+original to the app and is kept deliberately, because a request that never
+returns is worth watching from the outside:
+
+```bash
+kubectl top pod -l app=sudoku
+kubectl get pods -l app=sudoku --watch
+kubectl describe pod -l app=sudoku      # events: Unhealthy, Killing
+```
+
+The CPU limit is what keeps this instructive rather than destructive. A
+wedged request can consume this container's 200m and nothing more, so the
+node and everything else on it stay healthy. Inside the container the
+spinning thread starves the rest, `/healthz` stops being answered, the
+readiness probe pulls the pod out of the Service, and after three failed
+liveness probes the kubelet restarts it. The other replica serves throughout.
