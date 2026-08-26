@@ -1,6 +1,10 @@
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
+  # Named after the first app that used it, and it now fronts every app in the
+  # cluster. The name is wrong and stays wrong on purpose: renaming a Gateway
+  # means recreating it, and the replacement load balancer has to claim the
+  # static IP again — a few minutes with every site down, to fix a word.
   name: web
   annotations:
     # cert-manager watches this and keeps the secret named under the HTTPS
