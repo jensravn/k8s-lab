@@ -300,18 +300,45 @@ listener, reads the issuer annotation already on the Gateway, and fills
 The solver spins forever on puzzles that constraint propagation cannot
 finish — its backtracking loses track of which candidate the parent level had
 been trying, so it re-enters the branch that just failed. The defect is
-original to the app and is kept deliberately, because a request that never
-returns is worth watching from the outside:
+original to the app and is kept deliberately, to have something that fails in
+a way worth watching from the outside.
 
 ```bash
 kubectl top pod -l app=sudoku
 kubectl get pods -l app=sudoku --watch
-kubectl describe pod -l app=sudoku      # events: Unhealthy, Killing
+kubectl describe pod -l app=sudoku      # the Unhealthy events live here
 ```
 
-The CPU limit is what keeps this instructive rather than destructive. A
-wedged request can consume this container's 200m and nothing more, so the
-node and everything else on it stay healthy. Inside the container the
-spinning thread starves the rest, `/healthz` stops being answered, the
-readiness probe pulls the pod out of the Service, and after three failed
-liveness probes the kubelet restarts it. The other replica serves throughout.
+What actually happens is less dramatic than expected, and that is the lesson.
+
+**One wedged request is invisible.** CPU climbs from 20m to about 115m and
+stays there, memory rises a little, and nothing else changes. The pod keeps
+answering `/healthz`, keeps solving other puzzles in under 200ms, and is
+never taken out of the Service. The `limits.cpu` of 200m is what makes this
+true: the spinning thread cannot take more than the container is allowed, and
+what remains is plenty for everything else.
+
+**Two dozen wedged requests pin the container at its limit.** `kubectl top`
+reports exactly 201m, and the probes start timing out:
+
+```
+Warning  Unhealthy  Readiness probe failed: context deadline exceeded
+Warning  Unhealthy  Liveness probe failed:  context deadline exceeded
+```
+
+**But the pod is not restarted, and users do not notice.** The failures are
+intermittent rather than consecutive, so the liveness probe's
+`failureThreshold: 3` is never reached, and the pod stays `1/1 Running` with
+zero restarts. Twelve requests through the Gateway in that state all returned
+200, eleven of them under 250ms.
+
+So the honest summary is that limits worked, and the alarming symptom —
+probes failing — was visible only in `kubectl describe`. `kubectl get pods`
+showed nothing wrong at any point, which is worth remembering the next time
+it shows nothing wrong.
+
+Clearing it takes a delete; the threads never come back on their own:
+
+```bash
+kubectl delete pod -l app=sudoku
+```
