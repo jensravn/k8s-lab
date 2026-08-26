@@ -9,7 +9,6 @@ kubeconfig
 *.key
 
 # Personal, not part of the repository
-TODO.md
 .claude/settings.local.json
 
 # OS cruft

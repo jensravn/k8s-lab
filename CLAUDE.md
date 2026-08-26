@@ -51,17 +51,9 @@ The GHCR package is private and stays private. Pods pull it through the
 
 Applied with `kubectl apply -f manifests/<dir>/`.
 
-Comments explain *why* a field is set the way it is, or what breaks without
+Comments explain _why_ a field is set the way it is, or what breaks without
 it. The field name already says what it does; a comment repeating it is
 noise.
-
-## TODO.md
-
-A gitignored `TODO.md` may sit in the root. It is the owner's task list, not
-repository content. Read it at the start of a session if it is there, and
-keep it current as work lands. Delete finished items rather than ticking
-them off — the commit is the record, and the list is only useful while it
-stays short.
 
 ## Commits
 
